@@ -1,0 +1,7 @@
+{
+    "firebird": {
+        "user": "SYSDBA",
+        "password": "masterkey",
+        "dbname": "/path/to/your/fdb_file.fdb"
+    }
+}
