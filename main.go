@@ -2,82 +2,75 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
-	"os"
 	"time"
 
-	_ "github.com/nakagami/firebirdsql"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// Config representa a estrutura do arquivo de configuração
 type Config struct {
-	Firebird struct {
-		User     string `json:"user"`
-		Password string `json:"password"`
-		DBName   string `json:"dbname"`
-	} `json:"firebird"`
-}
-
-type Queries struct {
-	GetTables         string `json:"getTables"`
-	TOTAL_VENDIDO_DIA string `json:"TOTAL_VENDIDO_DIA"`
-	TICKET_MEDIO_DIA  string `json:"TICKET_MEDIO_DIA"`
-	// ... outras consultas ...
+	LocalDBConnection string            `json:"localDBConnection"`
+	MongoDBConnection string            `json:"mongoDBConnection"`
+	Queries           map[string]string `json:"queries"`
 }
 
 func main() {
-	// Carregar configuração do JSON
-	config, err := loadConfig("config.json")
+	// Carrega as configurações do arquivo JSON
+	config, err := loadConfig("coleta/config.json")
 	if err != nil {
-		log.Fatal("Erro ao carregar a configuração:", err)
+		log.Fatal("Erro ao carregar as configurações:", err)
 	}
 
-	// Carregar consultas do JSON
-	queries, err := loadQueries("queries.json")
+	// Conecta ao banco local
+	localDB, err := connectToLocalDB(config.LocalDBConnection)
 	if err != nil {
-		log.Fatal("Erro ao carregar as consultas:", err)
+		log.Fatal("Erro ao conectar ao banco local:", err)
 	}
+	defer localDB.Disconnect(context.Background())
 
-	// Conexão com o Firebird
-	firebirdDSN := fmt.Sprintf("user=%s password=%s dbname=%s", config.Firebird.User, config.Firebird.Password, config.Firebird.DBName)
-	firebirdDB, err := sql.Open("firebirdsql", firebirdDSN)
-	if err != nil {
-		log.Fatal("Erro ao conectar ao Firebird:", err)
+	// Acesse as consultas
+	for nomeConsulta, query := range config.Queries {
+		fmt.Printf("Executando a consulta %s: %s\n", nomeConsulta, query)
+
+		// Implemente a lógica de execução da consulta aqui
+		dados, err := executeQuery(localDB, query)
+		if err != nil {
+			log.Printf("Erro ao executar a consulta %s: %v", nomeConsulta, err)
+			continue
+		}
+
+		// Conecta ao MongoDB
+		mongoClient, err := connectToMongoDB(config.MongoDBConnection)
+		if err != nil {
+			log.Fatal("Erro ao conectar ao MongoDB:", err)
+		}
+		defer mongoClient.Disconnect(context.Background())
+
+		// Envia dados para o MongoDB
+		err = sendDataToMongoDB(mongoClient, dados)
+		if err != nil {
+			log.Printf("Erro ao enviar dados para o MongoDB após a consulta %s: %v", nomeConsulta, err)
+		} else {
+			fmt.Printf("Dados da consulta %s enviados para o MongoDB com sucesso!\n", nomeConsulta)
+		}
 	}
-	defer firebirdDB.Close()
-
-	// Conexão com o MongoDB
-	mongoURI := "mongodb+srv://suporte:Italo2013@suporte.ifkalhd.mongodb.net/?retryWrites=true&w=majority"
-	mongoDBName := "Suporte"
-	mongoCollectionName := "LOJAS"
-
-	mongoClient, err := mongo.Connect(context.Background(), options.Client().ApplyURI(mongoURI))
-	if err != nil {
-		log.Fatal("Erro ao conectar ao MongoDB:", err)
-	}
-	defer mongoClient.Disconnect(context.Background())
-
-	mongoDB := mongoClient.Database(mongoDBName)
-
-	// Executar consultas e inserir os dados no MongoDB
-	insertDataIntoMongoDB(firebirdDB, queries, mongoDB, mongoCollectionName)
-
 }
 
-func loadConfig(filename string) (*Config, error) {
-	file, err := os.Open(filename)
+func loadConfig(filePath string) (*Config, error) {
+	// Lê o arquivo de configuração
+	file, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
-	decoder := json.NewDecoder(file)
+	// Parse do JSON para a estrutura Config
 	var config Config
-	err = decoder.Decode(&config)
+	err = json.Unmarshal(file, &config)
 	if err != nil {
 		return nil, err
 	}
@@ -85,56 +78,74 @@ func loadConfig(filename string) (*Config, error) {
 	return &config, nil
 }
 
-func loadQueries(filename string) (*Queries, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	var queries Queries
-	err = decoder.Decode(&queries)
+func connectToLocalDB(connection string) (*mongo.Client, error) {
+	client, err := mongo.NewClient(options.Client().ApplyURI(connection))
 	if err != nil {
 		return nil, err
 	}
 
-	return &queries, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = client.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
 }
 
-func insertDataIntoMongoDB(firebirdDB *sql.DB, queries *Queries, mongoDB *mongo.Database, collectionName string) {
-	// Exemplo de como executar uma consulta e inserir dados no MongoDB
-	// Substitua este trecho pelo seu código para executar todas as consultas e processar os resultados
-
-	// Exemplo: Consulta TOTAL_VENDIDO_DIA
-	rows, err := firebirdDB.Query(queries.TOTAL_VENDIDO_DIA, time.Now(), time.Now())
+func executeQuery(client *mongo.Client, query string) ([]interface{}, error) {
+	// Implemente a lógica de execução da consulta no banco local
+	// Substitua o código abaixo com a sua lógica real
+	collection := client.Database("seu_banco").Collection("sua_colecao")
+	cursor, err := collection.Find(context.Background(), nil)
 	if err != nil {
-		log.Fatal("Erro ao executar consulta TOTAL_VENDIDO_DIA:", err)
+		return nil, err
 	}
-	defer rows.Close()
+	defer cursor.Close(context.Background())
 
-	// Exemplo: Processar os resultados e inserir no MongoDB
-	for rows.Next() {
-		var totalVendas float64
-		var totalCustos float64
-		var totalMargem float64
-		err := rows.Scan(&totalVendas, &totalCustos, &totalMargem)
+	var result []interface{}
+	for cursor.Next(context.Background()) {
+		var data interface{}
+		err := cursor.Decode(&data)
 		if err != nil {
-			log.Println("Erro ao processar resultado da consulta:", err)
-			continue
+			return nil, err
 		}
+		result = append(result, data)
+	}
 
-		data := map[string]interface{}{
-			"total_vendas": totalVendas,
-			"total_custos": totalCustos,
-			"total_margem": totalMargem,
-			"timestamp":    time.Now(),
-		}
+	return result, nil
+}
 
-		collection := mongoDB.Collection(collectionName)
-		_, err = collection.InsertOne(context.Background(), data)
+func connectToMongoDB(connection string) (*mongo.Client, error) {
+	client, err := mongo.NewClient(options.Client().ApplyURI(connection))
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = client.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+func sendDataToMongoDB(client *mongo.Client, data []interface{}) error {
+	// Implemente a lógica de envio de dados para o MongoDB
+	// Substitua o código abaixo com a sua lógica real
+	collection := client.Database("seu_banco_destino").Collection("sua_colecao_destino")
+
+	for _, d := range data {
+		_, err := collection.InsertOne(context.Background(), d)
 		if err != nil {
-			log.Println("Erro ao inserir dados no MongoDB:", err)
+			return err
 		}
 	}
+
+	return nil
 }
