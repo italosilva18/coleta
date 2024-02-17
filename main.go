@@ -131,7 +131,11 @@ func sendDataToMongoDB(client *mongo.Client, data []map[string]interface{}) erro
 		for key, value := range d {
 			switch key {
 			case "meio_pagto", "descricao":
-				convertedData[key] = fmt.Sprintf("%v", value)
+				if v, ok := value.([]uint8); ok {
+					convertedData[key] = string(v)
+				} else {
+					convertedData[key] = value
+				}
 			case "qtd", "valor":
 				if v, ok := value.([]uint8); ok {
 					convertedData[key] = string(v)
