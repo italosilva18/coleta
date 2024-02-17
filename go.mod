@@ -2,15 +2,7 @@ module coleta
 
 go 1.20
 
-require (
-	github.com/denisenkom/go-mssqldb v0.12.3
-	go.mongodb.org/mongo-driver v1.14.0
-)
-
-require (
-	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
-	github.com/golang-sql/sqlexp v0.1.0 // indirect
-)
+require go.mongodb.org/mongo-driver v1.14.0
 
 require (
 	github.com/go-sql-driver/mysql v1.7.1

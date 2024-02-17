@@ -1,36 +1,42 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
-	"log"
+	"time"
 
-	_ "github.com/denisenkom/go-mssqldb"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func test() {
-	// Substitua as informações de conexão com as configurações reais
-	server := "localhost"
-	port := 1433
-	user := "seu_usuario"
-	password := "sua_senha"
-	database := "seu_banco_de_dados"
-
-	// Construa a string de conexão
-	connectionString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s", server, user, password, port, database)
-
-	// Tenta conectar ao SQL Server
-	db, err := sql.Open("sqlserver", connectionString)
+func main() {
+	connectionString := "mongodb+srv://suporte:Italo2013@suporte.ifkalhd.mongodb.net/?retryWrites=true&w=majority"
+	client, err := mongo.NewClient(options.Client().ApplyURI(connectionString))
 	if err != nil {
-		log.Fatal("Erro ao conectar ao SQL Server:", err)
-	}
-	defer db.Close()
-
-	// Tenta fazer um ping para verificar a conexão
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("Erro ao fazer ping no SQL Server:", err)
+		fmt.Println("Erro ao criar o cliente MongoDB:", err)
+		return
 	}
 
-	log.Println("Conexão com o SQL Server bem-sucedida")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = client.Connect(ctx)
+	if err != nil {
+		fmt.Println("Erro ao conectar ao MongoDB:", err)
+		return
+	}
+	defer client.Disconnect(ctx)
+
+	fmt.Println("Conectado ao MongoDB com sucesso")
+
+	// Teste de Inserção
+	collection := client.Database("Suporte").Collection("LOJAS")
+	result, err := collection.InsertOne(ctx, bson.M{"chave": "valor"})
+	if err != nil {
+		fmt.Println("Erro ao inserir documento:", err)
+		return
+	}
+
+	fmt.Println("Documento inserido com ID:", result.InsertedID)
 }

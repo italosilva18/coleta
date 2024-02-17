@@ -8,7 +8,7 @@ import (
 	"log"
 	"time"
 
-	_ "github.com/denisenkom/go-mssqldb"
+	_ "github.com/go-sql-driver/mysql"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -27,17 +27,17 @@ func main() {
 		log.Fatal("Erro ao carregar as configurações:", err)
 	}
 
-	// Conecta ao banco SQL Server
-	sqlDB, err := connectToSQLServer(config.SQLDBConnection)
+	// Conecta ao banco MySQL
+	sqlDB, err := connectToMySQL(config.SQLDBConnection)
 	if err != nil {
-		log.Fatal("Erro ao conectar ao banco SQL Server:", err)
+		log.Fatal("Erro ao conectar ao MySQL:", err)
 	}
 	defer sqlDB.Close()
 
-	// Executa consulta SQL Server
-	result, err := executeQuerySQLServer(sqlDB, config.Queries["consulta1"])
+	// Executa consulta SQL
+	result, err := executeQuerySQL(sqlDB, config.Queries["consulta1"])
 	if err != nil {
-		log.Fatal("Erro ao executar consulta SQL Server:", err)
+		log.Fatal("Erro ao executar consulta SQL:", err)
 	}
 
 	// Conecta ao banco MongoDB
@@ -56,8 +56,8 @@ func main() {
 	log.Println("Dados enviados para o MongoDB com sucesso")
 }
 
-func connectToSQLServer(connection string) (*sql.DB, error) {
-	db, err := sql.Open("sqlserver", connection)
+func connectToMySQL(connection string) (*sql.DB, error) {
+	db, err := sql.Open("mysql", connection)
 	if err != nil {
 		return nil, err
 	}
@@ -68,12 +68,12 @@ func connectToSQLServer(connection string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	log.Println("Conectado ao banco local (SQL Server) com sucesso")
+	log.Println("Conectado ao banco local (MySQL) com sucesso")
 
 	return db, nil
 }
 
-func executeQuerySQLServer(db *sql.DB, query string) ([]interface{}, error) {
+func executeQuerySQL(db *sql.DB, query string) ([]interface{}, error) {
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -105,7 +105,7 @@ func executeQuerySQLServer(db *sql.DB, query string) ([]interface{}, error) {
 		result = append(result, rowData)
 	}
 
-	log.Printf("Consulta SQL Server executada com sucesso: %s", query)
+	log.Printf("Consulta SQL executada com sucesso: %s", query)
 
 	return result, nil
 }
@@ -128,7 +128,7 @@ func connectToMongoDB(connection string) (*mongo.Client, error) {
 }
 
 func sendDataToMongoDB(client *mongo.Client, data []interface{}) error {
-	collection := client.Database("Suporte").Collection("LOJA")
+	collection := client.Database("Suporte").Collection("LOJAS")
 
 	for _, d := range data {
 		_, err := collection.InsertOne(context.Background(), d)
