@@ -2,19 +2,20 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"time"
 
+	_ "github.com/denisenkom/go-mssqldb"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // Config representa a estrutura do arquivo de configuração
 type Config struct {
-	LocalDBConnection string            `json:"localDBConnection"`
+	SQLDBConnection   string            `json:"sqlDBConnection"`
 	MongoDBConnection string            `json:"mongoDBConnection"`
 	Queries           map[string]string `json:"queries"`
 }
@@ -26,94 +27,85 @@ func main() {
 		log.Fatal("Erro ao carregar as configurações:", err)
 	}
 
-	// Conecta ao banco local
-	localDB, err := connectToLocalDB(config.LocalDBConnection)
+	// Conecta ao banco SQL Server
+	sqlDB, err := connectToSQLServer(config.SQLDBConnection)
 	if err != nil {
-		log.Fatal("Erro ao conectar ao banco local:", err)
+		log.Fatal("Erro ao conectar ao banco SQL Server:", err)
 	}
-	defer localDB.Disconnect(context.Background())
+	defer sqlDB.Close()
 
-	// Acesse as consultas
-	for nomeConsulta, query := range config.Queries {
-		fmt.Printf("Executando a consulta %s: %s\n", nomeConsulta, query)
-
-		// Implemente a lógica de execução da consulta aqui
-		dados, err := executeQuery(localDB, query)
-		if err != nil {
-			log.Printf("Erro ao executar a consulta %s: %v", nomeConsulta, err)
-			continue
-		}
-
-		// Conecta ao MongoDB
-		mongoClient, err := connectToMongoDB(config.MongoDBConnection)
-		if err != nil {
-			log.Fatal("Erro ao conectar ao MongoDB:", err)
-		}
-		defer mongoClient.Disconnect(context.Background())
-
-		// Envia dados para o MongoDB
-		err = sendDataToMongoDB(mongoClient, dados)
-		if err != nil {
-			log.Printf("Erro ao enviar dados para o MongoDB após a consulta %s: %v", nomeConsulta, err)
-		} else {
-			fmt.Printf("Dados da consulta %s enviados para o MongoDB com sucesso!\n", nomeConsulta)
-		}
+	// Executa consulta SQL Server
+	result, err := executeQuerySQLServer(sqlDB, config.Queries["consulta1"])
+	if err != nil {
+		log.Fatal("Erro ao executar consulta SQL Server:", err)
 	}
+
+	// Conecta ao banco MongoDB
+	mongoClient, err := connectToMongoDB(config.MongoDBConnection)
+	if err != nil {
+		log.Fatal("Erro ao conectar ao banco MongoDB:", err)
+	}
+	defer mongoClient.Disconnect(context.Background())
+
+	// Envia dados para o MongoDB
+	err = sendDataToMongoDB(mongoClient, result)
+	if err != nil {
+		log.Fatal("Erro ao enviar dados para o MongoDB:", err)
+	}
+
+	log.Println("Dados enviados para o MongoDB com sucesso")
 }
 
-func loadConfig(filePath string) (*Config, error) {
-	// Lê o arquivo de configuração
-	file, err := ioutil.ReadFile(filePath)
+func connectToSQLServer(connection string) (*sql.DB, error) {
+	db, err := sql.Open("sqlserver", connection)
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse do JSON para a estrutura Config
-	var config Config
-	err = json.Unmarshal(file, &config)
+	// Verifica a conexão
+	err = db.Ping()
 	if err != nil {
 		return nil, err
 	}
 
-	return &config, nil
+	log.Println("Conectado ao banco local (SQL Server) com sucesso")
+
+	return db, nil
 }
 
-func connectToLocalDB(connection string) (*mongo.Client, error) {
-	client, err := mongo.NewClient(options.Client().ApplyURI(connection))
+func executeQuerySQLServer(db *sql.DB, query string) ([]interface{}, error) {
+	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	err = client.Connect(ctx)
+	columns, err := rows.Columns()
 	if err != nil {
 		return nil, err
 	}
-
-	return client, nil
-}
-
-func executeQuery(client *mongo.Client, query string) ([]interface{}, error) {
-	// Implemente a lógica de execução da consulta no banco local
-	// Substitua o código abaixo com a sua lógica real
-	collection := client.Database("seu_banco").Collection("sua_colecao")
-	cursor, err := collection.Find(context.Background(), nil)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(context.Background())
 
 	var result []interface{}
-	for cursor.Next(context.Background()) {
-		var data interface{}
-		err := cursor.Decode(&data)
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		for i := range values {
+			values[i] = new(interface{})
+		}
+
+		err := rows.Scan(values...)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, data)
+
+		rowData := make(map[string]interface{})
+		for i, col := range columns {
+			rowData[col] = *(values[i].(*interface{}))
+		}
+
+		result = append(result, rowData)
 	}
+
+	log.Printf("Consulta SQL Server executada com sucesso: %s", query)
 
 	return result, nil
 }
@@ -136,9 +128,7 @@ func connectToMongoDB(connection string) (*mongo.Client, error) {
 }
 
 func sendDataToMongoDB(client *mongo.Client, data []interface{}) error {
-	// Implemente a lógica de envio de dados para o MongoDB
-	// Substitua o código abaixo com a sua lógica real
-	collection := client.Database("seu_banco_destino").Collection("sua_colecao_destino")
+	collection := client.Database("Suporte").Collection("LOJA")
 
 	for _, d := range data {
 		_, err := collection.InsertOne(context.Background(), d)
@@ -148,4 +138,20 @@ func sendDataToMongoDB(client *mongo.Client, data []interface{}) error {
 	}
 
 	return nil
+}
+
+func loadConfig(filePath string) (Config, error) {
+	var config Config
+
+	content, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return config, err
+	}
+
+	err = json.Unmarshal(content, &config)
+	if err != nil {
+		return config, err
+	}
+
+	return config, nil
 }
