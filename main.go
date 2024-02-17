@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"time"
@@ -24,33 +25,33 @@ func main() {
 	// Carrega as configurações do arquivo JSON
 	config, err := loadConfig("coleta/config.json")
 	if err != nil {
-		log.Fatal("Erro ao carregar as configurações:", err)
+		log.Fatalf("Erro ao carregar as configurações: %v", err)
 	}
 
 	// Conecta ao banco MySQL
 	sqlDB, err := connectToMySQL(config.SQLDBConnection)
 	if err != nil {
-		log.Fatal("Erro ao conectar ao MySQL:", err)
+		log.Fatalf("Erro ao conectar ao MySQL: %v", err)
 	}
 	defer sqlDB.Close()
 
 	// Executa consulta SQL
 	result, err := executeQuerySQL(sqlDB, config.Queries["consulta1"])
 	if err != nil {
-		log.Fatal("Erro ao executar consulta SQL:", err)
+		log.Fatalf("Erro ao executar consulta SQL: %v", err)
 	}
 
 	// Conecta ao banco MongoDB
 	mongoClient, err := connectToMongoDB(config.MongoDBConnection)
 	if err != nil {
-		log.Fatal("Erro ao conectar ao banco MongoDB:", err)
+		log.Fatalf("Erro ao conectar ao banco MongoDB: %v", err)
 	}
 	defer mongoClient.Disconnect(context.Background())
 
 	// Envia dados para o MongoDB
 	err = sendDataToMongoDB(mongoClient, result)
 	if err != nil {
-		log.Fatal("Erro ao enviar dados para o MongoDB:", err)
+		log.Fatalf("Erro ao enviar dados para o MongoDB: %v", err)
 	}
 
 	log.Println("Dados enviados para o MongoDB com sucesso")
@@ -59,13 +60,11 @@ func main() {
 func connectToMySQL(connection string) (*sql.DB, error) {
 	db, err := sql.Open("mysql", connection)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Erro ao conectar ao MySQL: %v", err)
 	}
 
-	// Verifica a conexão
-	err = db.Ping()
-	if err != nil {
-		return nil, err
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("Erro ao realizar ping no MySQL: %v", err)
 	}
 
 	log.Println("Conectado ao banco local (MySQL) com sucesso")
@@ -73,28 +72,27 @@ func connectToMySQL(connection string) (*sql.DB, error) {
 	return db, nil
 }
 
-func executeQuerySQL(db *sql.DB, query string) ([]interface{}, error) {
+func executeQuerySQL(db *sql.DB, query string) ([]map[string]interface{}, error) {
 	rows, err := db.Query(query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Erro ao executar consulta SQL: %v", err)
 	}
 	defer rows.Close()
 
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Erro ao obter colunas: %v", err)
 	}
 
-	var result []interface{}
+	var result []map[string]interface{}
 	for rows.Next() {
 		values := make([]interface{}, len(columns))
 		for i := range values {
 			values[i] = new(interface{})
 		}
 
-		err := rows.Scan(values...)
-		if err != nil {
-			return nil, err
+		if err := rows.Scan(values...); err != nil {
+			return nil, fmt.Errorf("Erro ao fazer scan da linha: %v", err)
 		}
 
 		rowData := make(map[string]interface{})
@@ -113,25 +111,37 @@ func executeQuerySQL(db *sql.DB, query string) ([]interface{}, error) {
 func connectToMongoDB(connection string) (*mongo.Client, error) {
 	client, err := mongo.NewClient(options.Client().ApplyURI(connection))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Erro ao criar cliente MongoDB: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err = client.Connect(ctx)
-	if err != nil {
-		return nil, err
+	if err := client.Connect(ctx); err != nil {
+		return nil, fmt.Errorf("Erro ao conectar ao MongoDB: %v", err)
 	}
 
 	return client, nil
 }
-
-func sendDataToMongoDB(client *mongo.Client, data []interface{}) error {
+func sendDataToMongoDB(client *mongo.Client, data []map[string]interface{}) error {
 	collection := client.Database("Suporte").Collection("LOJAS")
 
 	for _, d := range data {
-		_, err := collection.InsertOne(context.Background(), d)
+		convertedData := make(map[string]interface{})
+		for key, value := range d {
+			switch key {
+			case "meio_pagto", "descricao":
+				convertedData[key] = fmt.Sprintf("%v", value)
+			case "qtd", "valor":
+				if v, ok := value.([]uint8); ok {
+					convertedData[key] = string(v)
+				} else {
+					convertedData[key] = value
+				}
+			}
+		}
+
+		_, err := collection.InsertOne(context.Background(), convertedData)
 		if err != nil {
 			return err
 		}
@@ -140,17 +150,32 @@ func sendDataToMongoDB(client *mongo.Client, data []interface{}) error {
 	return nil
 }
 
+func convertBytesToString(value interface{}) interface{} {
+	switch v := value.(type) {
+	case []byte:
+		return string(v)
+	case []interface{}:
+		// Se for um slice de interfaces, aplica a conversão recursivamente
+		var result []interface{}
+		for _, item := range v {
+			result = append(result, convertBytesToString(item))
+		}
+		return result
+	default:
+		return value
+	}
+}
+
 func loadConfig(filePath string) (Config, error) {
 	var config Config
 
 	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
-		return config, err
+		return config, fmt.Errorf("Erro ao ler arquivo de configuração: %v", err)
 	}
 
-	err = json.Unmarshal(content, &config)
-	if err != nil {
-		return config, err
+	if err := json.Unmarshal(content, &config); err != nil {
+		return config, fmt.Errorf("Erro ao fazer unmarshal do JSON: %v", err)
 	}
 
 	return config, nil
